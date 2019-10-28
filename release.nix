@@ -1,12 +1,17 @@
 { nix ? builtins.fetchGit ./.
 , nixpkgs ? builtins.fetchTarball https://github.com/NixOS/nixpkgs-channels/archive/nixos-19.03.tar.gz
 , officialRelease ? false
-, systems ? [ "x86_64-linux" "i686-linux" "x86_64-darwin" "aarch64-linux" ]
+, systems ? [ "armv7l-linux" ]
+, crossSystem ? ((import <nixpkgs/lib>).systems.examples.armv7l-hf-multiplatform)
 }:
 
 let
 
-  pkgs = import nixpkgs { system = builtins.currentSystem or "x86_64-linux"; };
+  pkgs = import nixpkgs {
+    system = (builtins.currentSystem or "x86_64-linux");
+    # crossSystem = { config = "armv7l-unknown-linux-gnueabihf"; };
+    inherit crossSystem;
+  };
 
   jobs = rec {
 
@@ -55,7 +60,7 @@ let
 
     build = pkgs.lib.genAttrs systems (system:
 
-      let pkgs = import nixpkgs { inherit system; }; in
+      let pkgs = import nixpkgs { inherit system crossSystem; }; in
 
       with pkgs;
 
@@ -96,7 +101,7 @@ let
 
     perlBindings = pkgs.lib.genAttrs systems (system:
 
-      let pkgs = import nixpkgs { inherit system; }; in with pkgs;
+      let pkgs = import nixpkgs { inherit system crossSystem; }; in with pkgs;
 
       releaseTools.nixBuild {
         name = "nix-perl";
@@ -119,7 +124,7 @@ let
 
     binaryTarball = pkgs.lib.genAttrs systems (system:
 
-      with import nixpkgs { inherit system; };
+      with import nixpkgs { inherit system crossSystem; };
 
       let
         toplevel = builtins.getAttr system jobs.build;
@@ -221,79 +226,79 @@ let
     #deb_ubuntu1710x86_64 = makeDeb_x86_64 (diskImageFuns: diskImageFuns.ubuntu1710x86_64) [ ] [ "libsodium18" "libboost-context1.62.0" ];
 
 
-    # System tests.
-    tests.remoteBuilds = (import ./tests/remote-builds.nix rec {
-      inherit nixpkgs;
-      nix = build.x86_64-linux; system = "x86_64-linux";
-    });
+    # # System tests.
+    # tests.remoteBuilds = (import ./tests/remote-builds.nix rec {
+    #   inherit nixpkgs;
+    #   nix = build.x86_64-linux; system = "x86_64-linux";
+    # });
 
-    tests.nix-copy-closure = (import ./tests/nix-copy-closure.nix rec {
-      inherit nixpkgs;
-      nix = build.x86_64-linux; system = "x86_64-linux";
-    });
+    # tests.nix-copy-closure = (import ./tests/nix-copy-closure.nix rec {
+    #   inherit nixpkgs;
+    #   nix = build.x86_64-linux; system = "x86_64-linux";
+    # });
 
-    tests.setuid = pkgs.lib.genAttrs
-      ["i686-linux" "x86_64-linux"]
-      (system:
-        import ./tests/setuid.nix rec {
-          inherit nixpkgs;
-          nix = build.${system}; inherit system;
-        });
+    # tests.setuid = pkgs.lib.genAttrs
+    #   ["i686-linux" "x86_64-linux"]
+    #   (system:
+    #     import ./tests/setuid.nix rec {
+    #       inherit nixpkgs;
+    #       nix = build.${system}; inherit system;
+    #     });
 
-    tests.binaryTarball =
-      with import nixpkgs { system = "x86_64-linux"; };
-      vmTools.runInLinuxImage (runCommand "nix-binary-tarball-test"
-        { diskImage = vmTools.diskImages.ubuntu1204x86_64;
-        }
-        ''
-          set -x
-          useradd -m alice
-          su - alice -c 'tar xf ${binaryTarball.x86_64-linux}/*.tar.*'
-          mkdir /dest-nix
-          mount -o bind /dest-nix /nix # Provide a writable /nix.
-          chown alice /nix
-          su - alice -c '_NIX_INSTALLER_TEST=1 ./nix-*/install'
-          su - alice -c 'nix-store --verify'
-          su - alice -c 'PAGER= nix-store -qR ${build.x86_64-linux}'
+    # tests.binaryTarball =
+    #   with import nixpkgs { system = "x86_64-linux"; };
+    #   vmTools.runInLinuxImage (runCommand "nix-binary-tarball-test"
+    #     { diskImage = vmTools.diskImages.ubuntu1204x86_64;
+    #     }
+    #     ''
+    #       set -x
+    #       useradd -m alice
+    #       su - alice -c 'tar xf ${binaryTarball.x86_64-linux}/*.tar.*'
+    #       mkdir /dest-nix
+    #       mount -o bind /dest-nix /nix # Provide a writable /nix.
+    #       chown alice /nix
+    #       su - alice -c '_NIX_INSTALLER_TEST=1 ./nix-*/install'
+    #       su - alice -c 'nix-store --verify'
+    #       su - alice -c 'PAGER= nix-store -qR ${build.x86_64-linux}'
 
-          # Check whether 'nix upgrade-nix' works.
-          cat > /tmp/paths.nix <<EOF
-          {
-            x86_64-linux = "${build.x86_64-linux}";
-          }
-          EOF
-          su - alice -c 'nix upgrade-nix -vvv --nix-store-paths-url file:///tmp/paths.nix'
-          (! [ -L /home/alice/.profile-1-link ])
-          su - alice -c 'PAGER= nix-store -qR ${build.x86_64-linux}'
+    #       # Check whether 'nix upgrade-nix' works.
+    #       cat > /tmp/paths.nix <<EOF
+    #       {
+    #         x86_64-linux = "${build.x86_64-linux}";
+    #       }
+    #       EOF
+    #       su - alice -c 'nix upgrade-nix -vvv --nix-store-paths-url file:///tmp/paths.nix'
+    #       (! [ -L /home/alice/.profile-1-link ])
+    #       su - alice -c 'PAGER= nix-store -qR ${build.x86_64-linux}'
 
-          mkdir -p $out/nix-support
-          touch $out/nix-support/hydra-build-products
-          umount /nix
-        ''); # */
+    #       mkdir -p $out/nix-support
+    #       touch $out/nix-support/hydra-build-products
+    #       umount /nix
+    #     ''); # */
 
-    tests.evalNixpkgs =
-      import (nixpkgs + "/pkgs/top-level/make-tarball.nix") {
-        inherit nixpkgs;
-        inherit pkgs;
-        nix = build.x86_64-linux;
-        officialRelease = false;
-      };
+    # tests.evalNixpkgs =
+    #   import (nixpkgs + "/pkgs/top-level/make-tarball.nix") {
+    #     inherit nixpkgs;
+    #     inherit pkgs;
+    #     nix = build.x86_64-linux;
+    #     officialRelease = false;
+    #   };
 
-    tests.evalNixOS =
-      pkgs.runCommand "eval-nixos" { buildInputs = [ build.x86_64-linux ]; }
-        ''
-          export NIX_STATE_DIR=$TMPDIR
+    # tests.evalNixOS =
+    #   pkgs.runCommand "eval-nixos" { buildInputs = [ build.x86_64-linux ]; }
+    #     ''
+    #       export NIX_STATE_DIR=$TMPDIR
 
-          nix-instantiate ${nixpkgs}/nixos/release-combined.nix -A tested --dry-run \
-            --arg nixpkgs '{ outPath = ${nixpkgs}; revCount = 123; shortRev = "abcdefgh"; }'
+    #       nix-instantiate ${nixpkgs}/nixos/release-combined.nix -A tested --dry-run \
+    #         --arg nixpkgs '{ outPath = ${nixpkgs}; revCount = 123; shortRev = "abcdefgh"; }'
 
-          touch $out
-        '';
+    #       touch $out
+    #     '';
 
 
     installerScript =
       pkgs.runCommand "installer-script"
-        { buildInputs = [ build.x86_64-linux ];
+        { buildInputs = [ build.armv7l-linux ];
         }
         ''
           mkdir -p $out/nix-support
@@ -301,9 +306,9 @@ let
           substitute ${./scripts/install.in} $out/install \
             ${pkgs.lib.concatMapStrings
               (system: "--replace '@binaryTarball_${system}@' $(nix hash-file --base16 --type sha256 ${binaryTarball.${system}}/*.tar.xz) ")
-              [ "x86_64-linux" "i686-linux" "x86_64-darwin" "aarch64-linux" ]
+              [ "armv7l-linux" ]
             } \
-            --replace '@nixVersion@' ${build.x86_64-linux.src.version}
+            --replace '@nixVersion@' ${build.armv7l-linux.src.version}
 
           echo "file installer $out/install" >> $out/nix-support/hydra-build-products
         '';
@@ -323,11 +328,11 @@ let
           binaryTarball.x86_64-darwin
           binaryTarball.x86_64-linux
           binaryTarball.aarch64-linux
-          tests.remoteBuilds
-          tests.nix-copy-closure
-          tests.binaryTarball
-          tests.evalNixpkgs
-          tests.evalNixOS
+          # tests.remoteBuilds
+          # tests.nix-copy-closure
+          # tests.binaryTarball
+          # tests.evalNixpkgs
+          # tests.evalNixOS
           installerScript
         ];
     };
@@ -341,7 +346,7 @@ let
   makeRPM =
     system: diskImageFun: extraPackages:
 
-    with import nixpkgs { inherit system; };
+    with import nixpkgs { inherit system crossSystem; };
 
     releaseTools.rpmBuild rec {
       name = "nix-rpm";
@@ -364,7 +369,7 @@ let
   makeDeb =
     system: diskImageFun: extraPackages: extraDebPackages:
 
-    with import nixpkgs { inherit system; };
+    with import nixpkgs { inherit system crossSystem; };
 
     releaseTools.debBuild {
       name = "nix-deb";
